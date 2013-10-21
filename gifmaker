@@ -10,6 +10,7 @@ import optparse
 import shutil
 import re
 import tempfile
+import gifwriter
 
 TIME_RE = re.compile('^[0-9]+:[0-9]{1,2}:[0-9]{1,2}$')
 
@@ -21,6 +22,8 @@ def validate_time(s) :
 		return False
 
 class OptionsException(Exception) :
+	pass
+class ProcessException(Exception) :
 	pass
 
 if __name__ == '__main__' :
@@ -73,6 +76,26 @@ if __name__ == '__main__' :
 	use_dir = tempfile.mkdtemp(prefix='gifmaker_')
 	try :
 		print 'created %s' % use_dir
+
+		# TODO don't force 480 x 270
+		# TODO use jpg instead of png? - at least optionally?
+		split = ['ffmpeg', '-ss', opts.input_start, '-i', opts.input_file, '-t', opts.input_length, '-s', '480x270', '-f', 'image2', use_dir + '/%06d.png']
+		print 'extracting frames'
+		# capture output instead of spamming the user? use avconv instead?
+		if subprocess.call(split) != 0 :
+			raise ProcessException("Failed to extract frames.")
+
+		frame_files = [os.path.join(use_dir, f) for f in os.listdir(use_dir)]
+		frame_files.sort()
+		print 'extracted %s frames.' % len(frame_files)
+
+		# TODO do fancy things like fps reduction, auto finding good loop points, etc here.
+		
+		print 'writing gif %s' % opts.output_file
+		gifwriter.write_gif(frame_files, opts.output_fps, opts.output_file)
+	except ProcessException, pe :
+		print 'error: %s' % pe.args[0]
+
 	finally :
 		shutil.rmtree(use_dir)
 		print 'removed %s' % use_dir
