@@ -1,0 +1,57 @@
+#!/usr/bin/env python
+
+import sys
+import os, os.path
+import time
+import json
+import subprocess
+import pprint
+import optparse
+import shutil
+
+def validate_time(s) :
+	# TODO validate h:m:s format
+	return True
+
+class OptionsException(Exception) :
+	pass
+
+if __name__ == '__main__' :
+	parser = optparse.OptionParser()
+	parser.add_option('--input-file', dest='input_file', help="Video file to operate from")
+	parser.add_option('--output-file', dest='output_file', help="Where to write GIF output")
+	parser.add_option('--input-fps', dest='input_fps', default='30', help='Integer. How many FPS the input video is.')
+	parser.add_option('--output-fps', dest='output_fps', default='30', help="Integer. How many FPS the output gif should be. Input FPS must be divisible by input FPS.")
+	parser.add_option('--input-start', dest='input_start', default='0:0:0', help="When to start the gif video segment. Format: h:m:s")
+	parser.add_option('--input-length', dest='input_length', default=None, help="How much video input. Required. Format: h:m:s")
+	(options, args) = parser.parse_args()
+
+	class Opts(object) :
+		pass
+
+	opts = Opts()
+
+	try :
+		opts.output_fps = int(options.output_fps)
+		opts.input_fps = int(options.input_fps)
+		if opts.output_fps < 1 :
+			raise OptionsException("Invalid output fps.")
+		if opts.input_fps < 1 :
+			raise OptionsException("Invalid input fps.")
+		if (opts.input_fps % opts.output_fps != 0) :
+			raise OptionsException("Invalid output fps: input fps must be divisible by output fps.")
+
+		opts.input_file = options.input_file
+		if not opts.input_file :
+			raise OptionsException("You must supply an input file.")
+		if not os.path.exists(opts.input_file) :
+			raise OptionsException("File %s does not exist." % opts.input_file)
+
+		opts.output_file = options.output_file
+		if not opts.output_file :
+			raise OptionsException("You must supply an output file.")
+		if os.path.exists(opts.output_file) :
+			raise OptionsException("File %s already exists." % opts.output_file)
+	except OptionsException, oe :
+		print 'error: %s' % oe.args[0]
+		sys.exit(1)
