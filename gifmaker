@@ -8,10 +8,16 @@ import subprocess
 import pprint
 import optparse
 import shutil
+import re
+
+TIME_RE = re.compile('^[0-9]+:[0-9]{1,2}:[0-9]{1,2}$')
 
 def validate_time(s) :
-	# TODO validate h:m:s format
-	return True
+	# TODO validate h:m:s format better, eg max out min and sec at 60?
+	if TIME_RE.match(s) :
+		return True
+	else :
+		return False
 
 class OptionsException(Exception) :
 	pass
@@ -28,7 +34,6 @@ if __name__ == '__main__' :
 
 	class Opts(object) :
 		pass
-
 	opts = Opts()
 
 	try :
@@ -52,6 +57,14 @@ if __name__ == '__main__' :
 			raise OptionsException("You must supply an output file.")
 		if os.path.exists(opts.output_file) :
 			raise OptionsException("File %s already exists." % opts.output_file)
+
+		opts.input_start = options.input_start
+		if not validate_time(opts.input_start) :
+			raise OptionsException("Invalid input start.")
+
+		opts.input_length = options.input_length
+		if not validate_time(opts.input_length) :
+			raise OptionsException("Invalid input length.")
 	except OptionsException, oe :
 		print 'error: %s' % oe.args[0]
 		sys.exit(1)
