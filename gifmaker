@@ -11,8 +11,9 @@ import shutil
 import re
 import tempfile
 import gifwriter
+import photohash
 
-TIME_RE = re.compile('^[0-9]+:[0-9]{1,2}:[0-9]{1,2}$')
+TIME_RE = re.compile('^[0-9]+:[0-9]{1,2}:[0-9]{1,2}(|\.[0-9]+)$')
 
 def validate_time(s) :
 	# TODO validate h:m:s format better, eg max out min and sec at 60?
@@ -26,14 +27,72 @@ class OptionsException(Exception) :
 class ProcessException(Exception) :
 	pass
 
+class FrameSet(object) :
+	def __init__(self) :
+		self.frames = []
+		self.relations = []
+
+	def add_frame(self, *a, **kw) :
+		frame = Frame(*a, **kw)
+		frame.frameset = self
+		self.frames.append(frame)
+		return frame
+
+	@property
+	def dot(self) :
+		return 'digraph graphname {\n  graph [\n     ratio=1 ];\n  ' + ';\n  '.join(['"%d" -> "%d"' % (r.f1.frame_number, r.f2.frame_number) for r in self.relations]) + ';\n}'
+
+class Frame(object) :
+	def __init__(self, frame_number, filename) :
+		self.frame_number = frame_number
+		self.filename = filename
+		self._avg_hash = None
+		self.relations = []
+		self.frameset = None
+
+	def __repr__(self) :
+		return str(self)
+
+	def __str__(self) :
+		return '%d:%s' % (self.frame_number, os.path.basename(self.filename))
+
+	def add_relation(self, f2, rt) :
+		r = FrameRelation(self, f2, rt)
+		self.relations.append(r)
+		f2.relations.append(r)
+		if self.frameset :
+			self.frameset.relations.append(r)
+		elif f2.frameset :
+			f2.frameset.relations.append(r)
+		
+		return r
+
+	@property
+	def avg_hash(self) :
+		if self._avg_hash is None :
+			self._avg_hash = photohash.average_hash(self.filename)
+		return self._avg_hash
+
+class RelationType :
+	NEXT = 0
+	SIMILAR = 1
+
+class FrameRelation(object) :
+	def __init__(self, f1, f2, rt) :
+		self.f1 = f1
+		self.f2 = f2
+		self.rt = rt
+		
 if __name__ == '__main__' :
 	parser = optparse.OptionParser()
 	parser.add_option('--input-file', dest='input_file', help="Video file to operate from")
 	parser.add_option('--output-file', dest='output_file', help="Where to write GIF output")
 	parser.add_option('--input-fps', dest='input_fps', default='30', help='Integer. How many FPS the input video is.')
 	parser.add_option('--output-fps', dest='output_fps', default='30', help="Integer. How many FPS the output gif should be. Input FPS must be divisible by input FPS.")
+	parser.add_option('--output-graph', dest='output_graph', default=None, help="Where to store a .dot file of the internal frame graph.")
 	parser.add_option('--input-start', dest='input_start', default='0:0:0', help="When to start the gif video segment. Format: h:m:s")
 	parser.add_option('--input-length', dest='input_length', default=None, help="How much video input. Required. Format: h:m:s")
+	parser.add_option('-f', '--force', dest='force', action='store_true', default=False, help="Force overwrite.")
 	(options, args) = parser.parse_args()
 
 	class Opts(object) :
@@ -56,11 +115,19 @@ if __name__ == '__main__' :
 		if not os.path.exists(opts.input_file) :
 			raise OptionsException("File %s does not exist." % opts.input_file)
 
+		opts.force = options.force
+
 		opts.output_file = options.output_file
-		if not opts.output_file :
-			raise OptionsException("You must supply an output file.")
-		if os.path.exists(opts.output_file) :
-			raise OptionsException("File %s already exists." % opts.output_file)
+		if not opts.force :
+			if not opts.output_file :
+				raise OptionsException("You must supply an output file.")
+			if os.path.exists(opts.output_file) :
+				raise OptionsException("File %s already exists." % opts.output_file)
+
+		opts.output_graph = options.output_graph
+		if not opts.force :
+			if opts.output_graph and os.path.exists(opts.output_graph) :
+				raise OptionsException("File %s already exists." % opts.output_graph)
 
 		opts.input_start = options.input_start
 		if not validate_time(opts.input_start) :
@@ -73,7 +140,7 @@ if __name__ == '__main__' :
 		print 'error: %s' % oe.args[0]
 		sys.exit(1)
 
-	use_dir = tempfile.mkdtemp(prefix='gifmaker_')
+	use_dir = tempfile.mkdtemp(prefix='gifl00p_')
 	try :
 		print 'created %s' % use_dir
 
@@ -87,15 +154,52 @@ if __name__ == '__main__' :
 
 		frame_files = [os.path.join(use_dir, f) for f in os.listdir(use_dir)]
 		frame_files.sort()
+
 		print 'extracted %s frames.' % len(frame_files)
+
+		frameset = FrameSet()
+		previous_frame = None
+		for i in range(len(frame_files)) :
+			frame_file = frame_files[i]
+			new_frame = frameset.add_frame(i, frame_file)
+
+			if previous_frame :
+				previous_frame.add_relation(new_frame, RelationType.NEXT)
+
+			previous_frame = new_frame
+
+		print 'hashing frames and determining similarity'
+		hash_to_frames = dict()
+		for f in frameset.frames :
+			if f.avg_hash not in hash_to_frames :
+				hash_to_frames[f.avg_hash] = []
+			hash_to_frames[f.avg_hash].append(f)
+			print 'hashed %s' % f
+
+		for h,fl in hash_to_frames.items() :
+			for i in range(len(fl)) :
+				for j in range(len(fl)) : # should we really care about directionality?
+					if i != j and fl[j].frame_number < fl[i].frame_number :
+						fl[i].add_relation(fl[j], RelationType.SIMILAR)
+						print 'similar: %s, %s' % (fl[i], fl[j])
+					
+		print 'frames hashed and similarity determined'
+
+		if opts.output_graph :
+			fh = open(opts.output_graph, 'w')
+			try :
+				fh.write(frameset.dot)
+				print 'wrote %s' % opts.output_graph
+			finally :
+				fh.close()
 
 		# TODO do fancy things like fps reduction, auto finding good loop points, etc here.
 		
-		print 'writing gif %s' % opts.output_file
+		#print 'not writing gif %s' % opts.output_file #
 		gifwriter.write_gif(frame_files, opts.output_fps, opts.output_file)
 	except ProcessException, pe :
 		print 'error: %s' % pe.args[0]
 
 	finally :
-		shutil.rmtree(use_dir)
+		shutil.rmtree(use_dir) #XXX
 		print 'removed %s' % use_dir
