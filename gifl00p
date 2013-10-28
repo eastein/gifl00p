@@ -16,7 +16,7 @@ import photohash
 TIME_RE = re.compile('^[0-9]+:[0-9]{1,2}:[0-9]{1,2}(|\.[0-9]+)$')
 
 def validate_time(s) :
-	# TODO validate h:m:s format better, eg max out min and sec at 60?
+	# TODO validate h:m:s[.subsec] format better, eg max out min and sec at 60?
 	if TIME_RE.match(s) :
 		return True
 	else :
@@ -72,6 +72,10 @@ class Frame(object) :
 		if self._avg_hash is None :
 			self._avg_hash = photohash.average_hash(self.filename)
 		return self._avg_hash
+
+	def distance(self, f2) :
+		# don't use hash for this, it's not good enough. all collide.
+		return photohash.distance(self.filename, f2.filename)
 
 class RelationType :
 	NEXT = 0
@@ -180,11 +184,13 @@ if __name__ == '__main__' :
 			for i in range(len(fl)) :
 				for j in range(len(fl)) : # should we really care about directionality?
 					if i != j and fl[j].frame_number < fl[i].frame_number :
+						#print 'would add similar relation. distance is %s' % (str(fl[j].distance(fl[i])))
+						# here, I need to add similar relations 
 						fl[i].add_relation(fl[j], RelationType.SIMILAR)
-						print 'similar: %s, %s' % (fl[i], fl[j])
+						#print 'similar: %s, %s' % (fl[i], fl[j])
 					
 		print 'frames hashed and similarity determined'
-
+		print 'similarity relations: %d' % len(frameset.relations)
 		if opts.output_graph :
 			fh = open(opts.output_graph, 'w')
 			try :
